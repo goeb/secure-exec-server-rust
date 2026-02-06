@@ -1,3 +1,4 @@
+use std::io::Read;
 
 const USAGE: &str = "
 usage: ses TCP-PORT CERTIFICATE ...
@@ -31,6 +32,15 @@ macro_rules! FATAL {
     };
 }
 
+macro_rules! INFO {
+    ($($e:expr),+ ) => {
+        {
+            println!($($e),*);
+        }
+    };
+}
+
+
 
 fn main() {
 
@@ -48,11 +58,11 @@ fn main() {
 
     for certfile in args {
         // TODO load public key from certificate
-        println!("certfile={certfile}");
+        INFO!("certfile={certfile}");
     }
     let pubkeys = (); // TODO
 
-    println!("Listening on port {port}");
+    INFO!("Listening on port {port}");
     let listen_addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let listen_result = std::net::TcpListener::bind(listen_addr);
     let listener: std::net::TcpListener = match listen_result {
@@ -68,7 +78,9 @@ fn mainloop(listener: std::net::TcpListener, pubkeys: ()) {
     for conn in listener.incoming() {
         match conn {
             Ok(conn) => {
-                handle_connection(conn, client_identifier, pubkeys);
+                std::thread::spawn(move || {
+                    handle_connection(conn, client_identifier, pubkeys);
+                });
             }
             Err(err) => eprintln!("Error accepting conn: {err}"),
         };
@@ -76,6 +88,31 @@ fn mainloop(listener: std::net::TcpListener, pubkeys: ()) {
     }
 }
 
-fn handle_connection(conn: std::net::TcpStream, client_identifier: u32, pubkeys: ()) {
-    FATAL!("handle_connection not implemented");
+fn handle_connection(mut conn: std::net::TcpStream, client_identifier: u32, pubkeys: ()) {
+    INFO!("{client_identifier}: new client connected");
+
+    let mut buffer: [u8; 10] = [0; 10];
+    let mut bytes_received: Vec<u8> = Vec::new();
+
+    loop {
+        let result: std::io::Result<usize> = conn.read(&mut buffer);
+        let n: usize = match result {
+            Ok(n) => n,
+            Err(err) => {
+                INFO!("{client_identifier}: read error: {err}");
+                return;
+            }
+        };
+        if n == 0 {
+            break;
+        }
+        let chunk_received: &[u8] = &buffer[..n];
+        INFO!("{client_identifier}: got chunk: {chunk_received:?}");
+        // Concatenate with bytes previously received
+        bytes_received.append(&mut chunk_received.to_vec());
+    }
+    INFO!("{client_identifier}: number of bytes received: {}", bytes_received.len());
+    // start a thread, that reads all incoming bytes
+    // then parses the signature line, authenticates
+    // then executes the bash scrip
 }
