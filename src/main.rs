@@ -112,7 +112,13 @@ fn handle_connection(mut conn: std::net::TcpStream, client_identifier: u32, pubk
         bytes_received.append(&mut chunk_received.to_vec());
     }
     INFO!("{client_identifier}: number of bytes received: {}", bytes_received.len());
-    // start a thread, that reads all incoming bytes
-    // then parses the signature line, authenticates
-    // then executes the bash scrip
+    if bytes_received.len() == 0 {
+        // No byte received
+    } else if bytes_received == "shutdown\n".as_bytes() {
+        INFO!("{client_identifier}: shutdown requested");
+        std::process::exit(0);
+    } else {
+        // authenticate_script(bytes_received, pubkeys)
+        // execute_script(bytes_received, client_identifier)
+    }
 }
