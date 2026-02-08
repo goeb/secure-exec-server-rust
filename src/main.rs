@@ -1,5 +1,7 @@
 use std::io::Read;
 
+pub mod ses_crypto;
+
 const USAGE: &str = "
 usage: ses TCP-PORT CERTIFICATE ...
 
@@ -56,11 +58,18 @@ fn main() {
         Err(err) => FATAL!("Invalid argument TCP-PORT: {port_str} ({err})"),
     };
 
-    for certfile in args {
-        // TODO load public key from certificate
-        INFO!("certfile={certfile}");
+    let mut pubkeys: Vec<ses_crypto::PublicKey> = Vec::new();
+    for cert_filename in args {
+        INFO!("certfile={cert_filename}");
+        let result: std::io::Result<ses_crypto::PublicKey> = ses_crypto::load_public_key(&cert_filename);
+        if let Ok(pubkey) = result {
+            if pubkey.key.len() != 0 {
+                pubkeys.push(pubkey);
+            } // else this certificate should be ignored (bad key usage)
+        } else if let Err(err) = result {
+            INFO!("Cannot load certificate '{cert_filename}': {err}");
+        }
     }
-    let pubkeys = (); // TODO
 
     INFO!("Listening on port {port}");
     let listen_addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
@@ -73,13 +82,14 @@ fn main() {
     mainloop(listener, pubkeys);
 }
 
-fn mainloop(listener: std::net::TcpListener, pubkeys: ()) {
+fn mainloop(listener: std::net::TcpListener, pubkeys: Vec<ses_crypto::PublicKey>) {
     let mut client_identifier: u32 = 0;
     for conn in listener.incoming() {
         match conn {
             Ok(conn) => {
+                let pubkeys2 = pubkeys.clone();
                 std::thread::spawn(move || {
-                    handle_connection(conn, client_identifier, pubkeys);
+                    handle_connection(conn, client_identifier, pubkeys2);
                 });
             }
             Err(err) => eprintln!("Error accepting conn: {err}"),
@@ -88,7 +98,7 @@ fn mainloop(listener: std::net::TcpListener, pubkeys: ()) {
     }
 }
 
-fn handle_connection(mut conn: std::net::TcpStream, client_identifier: u32, pubkeys: ()) {
+fn handle_connection(mut conn: std::net::TcpStream, client_identifier: u32, pubkeys: Vec<ses_crypto::PublicKey>) {
     INFO!("{client_identifier}: new client connected");
 
     let mut buffer: [u8; 10] = [0; 10];
