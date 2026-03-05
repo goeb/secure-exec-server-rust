@@ -1,4 +1,11 @@
-use std::io::Read;
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::io::prelude::*;
+use mio::net::{TcpListener, TcpStream};
+use mio::{Events, Interest, Poll, Token};
+
+// Some tokens to allow us to identify which event is for which socket.
+const SERVER: Token = Token(0);
 
 pub mod ses_crypto;
 
@@ -73,8 +80,8 @@ fn main() {
 
     INFO!("Listening on port {port}");
     let listen_addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    let listen_result = std::net::TcpListener::bind(listen_addr);
-    let listener: std::net::TcpListener = match listen_result {
+    let listen_result = mio::net::TcpListener::bind(listen_addr);
+    let listener: mio::net::TcpListener = match listen_result {
         Ok(listener) => listener,
         Err(err) => FATAL!("Error listening: {err}"),
     };
@@ -82,8 +89,22 @@ fn main() {
     mainloop(listener, pubkeys);
 }
 
-fn mainloop(listener: std::net::TcpListener, pubkeys: Vec<ses_crypto::PublicKey>) {
+enum EventSource {
+    Listener(mio::net::TcpListener),
+    ClientStream(u32), // Carries client identifier
+    ChildProcess(std::process::Child)
+}
+
+fn mainloop(mut listener: mio::net::TcpListener, pubkeys: Vec<ses_crypto::PublicKey>) -> Result<(), std::io::Error> {
     let mut client_identifier: u32 = 0;
+    let mut source_token_id: usize = 0;
+    let mut sources: HashMap<usize, EventSource> = HashMap::new();
+    sources.insert(source_token_id, EventSource::Listener(listener));
+    let SERVER: Token = Token(source_token_id);
+    let mut poll = Poll::new()?;
+    poll.registry().register(&mut listener, SERVER, Interest::READABLE)?;
+
+    // TODO adapt logic with mio
     for conn in listener.incoming() {
         match conn {
             Ok(conn) => {
@@ -98,7 +119,7 @@ fn mainloop(listener: std::net::TcpListener, pubkeys: Vec<ses_crypto::PublicKey>
     }
 }
 
-fn handle_connection(mut conn: std::net::TcpStream, client_identifier: u32, pubkeys: Vec<ses_crypto::PublicKey>) {
+fn handle_connection(mut conn: mio::net::TcpStream, client_identifier: u32, pubkeys: Vec<ses_crypto::PublicKey>) {
     INFO!("{client_identifier}: new client connected");
 
     let mut buffer: [u8; 10] = [0; 10];
